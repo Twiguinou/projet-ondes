@@ -39,8 +39,12 @@ def normalize(a):
     return a / np.linalg.norm(a)
 
 R = 1
-int_lo = np.linspace(400, 700, 10)
+B = 1.259 * 10e-14
+C = 8 * 10e-29
+int_lo = np.linspace(450, 750, 8)
 epsilon = 1e-6
+NS = 1.62
+NA = 1
 
 def raycast(start, dv):
     s = np.dot(start, dv)
@@ -63,27 +67,70 @@ def raycast(start, dv):
     return None
 
 def surface_angle(a, dv):
+    ur = normalize(a)
+    return np.arccos(np.dot(dv, np.array([ur[1], -ur[0]])))
 
 
+def deviate_surface(a, dv, theta):
+    ur = normalize(a)
+    theta = np.pi * 0.5 - theta
+    ct, st = np.cos(theta), np.sin(theta)
+    if np.dot(dv, np.array([ur[1], -ur[0]])) < 0:
+        rot_matrix = np.array([[ct, -st], [st, ct]])
+    else:
+        rot_matrix = np.array([[ct, st], [-st, ct]])
+    return np.matmul(rot_matrix, dv)
+
+
+def refractive_index(m, wavelength):
+    if wavelength < 500:
+        n = 0.1
+    elif wavelength < 550:
+        n = 0.2
+    elif wavelength < 600:
+        n = 0.3
+    else:
+        n = 0.4
+    return (NS + n) if np.linalg.norm(m) - R < epsilon else NA
+
+
+plt.style.use("dark_background")
 fig, ax = plt.subplots()
 ax.axis('equal')
 
-particule = ptc.Circle((0, 0), R, facecolor='none', edgecolor='r', linewidth=2)
+particule = ptc.Circle((0, 0), R, facecolor='none', edgecolor='w', linewidth=2)
 ax.add_patch(particule)
 
-rays = [(np.array([-2, -2]), normalize(np.array([1, 1])), int_lo)]
+origin = np.array([-2, -2])
+rays = [(origin, normalize(np.array([1, 1.5])), int_lo)]
+white = np.array([255, 255, 255])
 while len(rays) > 0:
     ray = rays.pop()
-    (point, direction, wls) = ray
-    cast = raycast(point, direction)
-
+    (point, incoming_direction, wls) = ray
+    cast = raycast(point, incoming_direction)
     if cast is not None:
-        color = np.array([0, 0, 0])
-        for l in wls:
-            color += wavelength_to_rgb(l)
-        color = np.minimum(color, np.array([255, 255, 255])) / 255
+        keep = True
+    else:
+        keep = False
+        cast = point + normalize(incoming_direction)
 
-        ax.plot((point[0],cast[0]), (point[1],cast[1]), color=color)
-        rays.append((cast, direction, wls))
+    color = np.array([0, 0, 0])
+    for l in wls:
+        color += wavelength_to_rgb(l)
+    color = np.minimum(color, white) / 255
+    ax.plot((point[0], cast[0]), (point[1], cast[1]), color=color)
+
+    theta1 = surface_angle(cast, incoming_direction)
+    for wavelength in wls:
+        mwl = wavelength * 10e-9
+        n1, n2 = refractive_index(origin, mwl), refractive_index(cast, mwl)
+        sin_theta2 = np.sin(theta1) * (n1 + mwl * 1.2e+5) / n2
+        direction = incoming_direction
+        if np.abs(sin_theta2) < 1:
+            theta2 = np.arcsin(sin_theta2)
+            if np.abs(theta2 - theta1) > epsilon:
+                direction = deviate_surface(cast, direction, theta2)
+        if keep:
+            rays.append((cast, direction, [wavelength]))
 
 plt.show()
